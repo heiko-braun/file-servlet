@@ -88,7 +88,7 @@ public class FileSystemServlet
 
         System.out.println("<< Repository dir is: "+repo.getAbsolutePath() +" >>");
 
-        this.fileSystem = new DiskFileSystem(repo);
+        this.fileSystem = new DiskFileSystem(repo, false);
     }
 
 
@@ -312,6 +312,7 @@ public class FileSystemServlet
     protected void _doPut( HttpServletRequest req, HttpServletResponse resp )
             throws ServletException, IOException
     {
+
         String path = req.getPathInfo();
         String context;
         if ( path == null )
