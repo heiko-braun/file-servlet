@@ -23,14 +23,16 @@ import org.codehaus.mojo.mrm.api.DirectoryEntry;
 import org.codehaus.mojo.mrm.api.Entry;
 import org.codehaus.mojo.mrm.api.FileEntry;
 import org.codehaus.mojo.mrm.api.FileSystem;
-import org.codehaus.mojo.mrm.impl.MemoryFileSystem;
+import org.codehaus.mojo.mrm.impl.DiskFileSystem;
 import org.codehaus.mojo.mrm.impl.Utils;
 
+import javax.servlet.ServletConfig;
 import javax.servlet.ServletException;
 import javax.servlet.ServletInputStream;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -69,26 +71,22 @@ public class FileSystemServlet
      */
     private FileSystem fileSystem;
 
-    /**
-     * Default constructor.
-     *
-     * @since 1.0
-     */
-    public FileSystemServlet()
-    {
-        this.fileSystem = new MemoryFileSystem();
+    @Override
+    public void init(ServletConfig config) throws ServletException {
+        super.init(config);
+
+        String repositoryDir = config.getInitParameter("repository.dir");
+        File repo = new File(repositoryDir);
+        if(repo.exists() == false)
+        {
+            throw new RuntimeException("The repository "+repo+" does ot exist!");
+        }
+
+        System.out.println("<< Repository dir is: "+repo.getAbsolutePath() +" >>");
+
+        this.fileSystem = new DiskFileSystem(repo);
     }
 
-    /**
-     * Constructor that takes a specific file system instance.
-     *
-     * @param fileSystem the file systen to serve.
-     * @since 1.0
-     */
-    public FileSystemServlet( FileSystem fileSystem )
-    {
-        this.fileSystem = fileSystem;
-    }
 
     /**
      * {@inheritDoc}
