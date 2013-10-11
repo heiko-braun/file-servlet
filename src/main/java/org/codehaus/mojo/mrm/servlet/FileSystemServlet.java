@@ -45,9 +45,13 @@ import java.util.Date;
  * Servlet that serves a {@link FileSystem}.
  *
  * @since 1.0
+ *
+ * @author the orig mrm contributors
+ * @author heiko braun (some modifications)
+ *
  */
 public class FileSystemServlet
-    extends HttpServlet
+        extends HttpServlet
 {
 
     /**
@@ -79,7 +83,7 @@ public class FileSystemServlet
         File repo = new File(repositoryDir);
         if(repo.exists() == false)
         {
-            throw new RuntimeException("The repository "+repo+" does ot exist!");
+            throw new RuntimeException("The repository "+repo+" does not exist!");
         }
 
         System.out.println("<< Repository dir is: "+repo.getAbsolutePath() +" >>");
@@ -92,8 +96,10 @@ public class FileSystemServlet
      * {@inheritDoc}
      */
     protected void doGet( HttpServletRequest req, HttpServletResponse resp )
-        throws ServletException, IOException
+            throws ServletException, IOException
     {
+        boolean doesRequestJson = true ;//req.getHeader("Accept").contains("application/json");
+
         String path = req.getPathInfo();
         String context;
         if ( path == null )
@@ -109,25 +115,7 @@ public class FileSystemServlet
         if ( entry instanceof FileEntry )
         {
             FileEntry fileEntry = (FileEntry) entry;
-            long size = fileEntry.getSize();
-            if ( size >= 0 && size < Integer.MAX_VALUE )
-            {
-                resp.setContentLength( (int) size );
-            }
-            resp.setContentType( getServletContext().getMimeType( fileEntry.getName() ) );
-            InputStream source = null;
-            OutputStream destination = null;
-            try
-            {
-                source = fileEntry.getInputStream();
-                destination = resp.getOutputStream();
-                IOUtils.copy( source, destination );
-            }
-            finally
-            {
-                IOUtils.closeQuietly( source );
-                IOUtils.closeQuietly( destination );
-            }
+            serverFileRaw(resp, fileEntry);
             return;
         }
         else if ( entry instanceof DirectoryEntry )
@@ -139,102 +127,190 @@ public class FileSystemServlet
             }
             DirectoryEntry dirEntry = (DirectoryEntry) entry;
             Entry[] entries = fileSystem.listEntries( dirEntry );
-            resp.setContentType( "text/html" );
-            PrintWriter w = resp.getWriter();
-            w.println( "<html>" );
-            w.println( "  <head>" );
-            w.println( "    <title>Index of " + context + path + "</title>" );
-            w.println( "    <meta http-equiv=\"Content-Type\" repository=\"text/html; charset=utf-8\"/>" );
-            w.println( "</head>" );
-            w.println( "<body>" );
-            w.println( "<h1>Index of " + context + path + "</h1>" );
-            w.println( "  <hr/>" );
-            w.write( "<pre>" );
-
-            if ( dirEntry.getParent() != null )
-            {
-                w.println( "<a href='../'>../</a>" );
-            }
-            SimpleDateFormat format = new SimpleDateFormat( "dd-MMM-yyyy hh:mm" );
-            if ( entries != null )
-            {
-                for ( int i = 0; i < entries.length; i++ )
-                {
-                    final String childName = entries[i].getName();
-                    boolean directory = entries[i] instanceof DirectoryEntry;
-                    if ( directory )
-                    {
-                        String dirName = childName + "/";
-                        w.write(
-                            "<a href=\"./" + Utils.urlEncodePathSegment( childName ) + "/\">" + formatName( dirName )
-                                + "</a>" + StringUtils.repeat( " ",
-                                                               Math.max( 0, NAME_COL_WIDTH - dirName.length() ) ) );
-                    }
-                    else
-                    {
-                        w.write(
-                            "<a href=\"./" + Utils.urlEncodePathSegment( childName ) + "\">" + formatName( childName )
-                                + "</a>" + StringUtils.repeat( " ",
-                                                               Math.max( 0, NAME_COL_WIDTH - childName.length() ) ) );
-                    }
-
-                    long timestamp = 0;
-                    try
-                    {
-                        timestamp = entries[i].getLastModified();
-                    }
-                    catch ( IOException e )
-                    {
-                        // ignore
-                    }
-
-                    w.write( " " );
-                    w.write( format.format( timestamp != -1 ? new Date( timestamp ) : new Date() ) );
-                    if ( directory )
-                    {
-                        w.println( StringUtils.leftPad( "-", SIZE_COL_WIDTH ) );
-                    }
-                    else if ( entries[i] instanceof FileEntry )
-                    {
-                        FileEntry fileEntry = (FileEntry) entries[i];
-                        try
-                        {
-                            long size = fileEntry.getSize();
-                            if ( size >= 0 )
-                            {
-                                w.println( StringUtils.leftPad( Long.toString( size ), SIZE_COL_WIDTH ) );
-                            }
-                            else
-                            {
-                                w.println( StringUtils.leftPad( "-", SIZE_COL_WIDTH ) );
-                            }
-                        }
-                        catch ( IOException e )
-                        {
-                            w.println( StringUtils.leftPad( "-", SIZE_COL_WIDTH ) );
-                        }
-                    }
-                    else
-                    {
-                        w.println( StringUtils.leftPad( "-", SIZE_COL_WIDTH ) );
-                    }
-                }
-            }
-            w.write( "</pre>" );
-            w.println( "  <hr/>" );
-            w.println( "</body>" );
-            w.println( "</html>" );
+            if(doesRequestJson)
+                serverDirectoryAsJSON(req, resp, path, context, dirEntry, entries);
+            else
+                serveDirectoryAsHTML(resp, path, context, dirEntry, entries);
             return;
         }
 
         resp.sendError( HttpURLConnection.HTTP_NOT_FOUND );
     }
 
+    private void serverDirectoryAsJSON(
+            HttpServletRequest req, HttpServletResponse resp,
+            String path, String context,
+            DirectoryEntry dirEntry, Entry[] entries) throws IOException {
+
+        resp.setContentType( "application/json" );
+        PrintWriter w = resp.getWriter();
+
+        if ( entries != null )
+        {
+            w.write("[");
+            for ( int i = 0; i < entries.length; i++ )
+            {
+                final String childName = entries[i].getName();
+                boolean directory = entries[i] instanceof DirectoryEntry;
+                String pathName = "http://"+ req.getHeader("host") + context + "/"+ Utils.urlEncodePathSegment(childName);
+
+                if ( directory )
+                {
+                    String dirName = childName + "/";
+                    w.write("{");
+                    w.write("type: 'dir',");
+                    w.write("name: '"+dirName+"',");
+                    w.write("link: '"+pathName+"'");
+                    w.write("}");
+                }
+                else
+                {
+                    w.write("{");
+                    w.write("type: 'file',");
+                    w.write("name: '"+childName+"',");
+                    w.write("link: '"+pathName+"'");
+                    w.write("}");
+                }
+
+                if(i<entries.length-1)
+                    w.write(",");
+
+            }
+            w.write("]");
+        }
+
+    }
+
+    private void serverFileRaw(HttpServletResponse resp, FileEntry fileEntry) throws IOException {
+        long size = fileEntry.getSize();
+        if ( size >= 0 && size < Integer.MAX_VALUE )
+        {
+            resp.setContentLength( (int) size );
+        }
+        resp.setContentType( getServletContext().getMimeType( fileEntry.getName() ) );
+        InputStream source = null;
+        OutputStream destination = null;
+        try
+        {
+            source = fileEntry.getInputStream();
+            destination = resp.getOutputStream();
+            IOUtils.copy(source, destination);
+        }
+        finally
+        {
+            IOUtils.closeQuietly( source );
+            IOUtils.closeQuietly( destination );
+        }
+    }
+
+    private void serveDirectoryAsHTML(HttpServletResponse resp, String path, String context, DirectoryEntry dirEntry, Entry[] entries) throws IOException {
+        resp.setContentType( "text/html" );
+        PrintWriter w = resp.getWriter();
+        w.println( "<html>" );
+        w.println( "  <head>" );
+        w.println( "    <title>Index of " + context + path + "</title>" );
+        w.println( "    <meta http-equiv=\"Content-Type\" repository=\"text/html; charset=utf-8\"/>" );
+        w.println( "</head>" );
+        w.println( "<body>" );
+        w.println( "<h1>Index of " + context + path + "</h1>" );
+        w.println( "  <hr/>" );
+        w.write( "<pre>" );
+
+        if ( dirEntry.getParent() != null )
+        {
+            w.println( "<a href='../'>../</a>" );
+        }
+        SimpleDateFormat format = new SimpleDateFormat( "dd-MMM-yyyy hh:mm" );
+        if ( entries != null )
+        {
+            for ( int i = 0; i < entries.length; i++ )
+            {
+                final String childName = entries[i].getName();
+                boolean directory = entries[i] instanceof DirectoryEntry;
+                if ( directory )
+                {
+                    String dirName = childName + "/";
+                    w.write(
+                            "<a href=\"./" + Utils.urlEncodePathSegment(childName) + "/\">" + formatName( dirName )
+                                    + "</a>" + StringUtils.repeat(" ",
+                                    Math.max(0, NAME_COL_WIDTH - dirName.length())) );
+                }
+                else
+                {
+                    w.write(
+                            "<a href=\"./" + Utils.urlEncodePathSegment( childName ) + "\">" + formatName( childName )
+                                    + "</a>" + StringUtils.repeat( " ",
+                                    Math.max( 0, NAME_COL_WIDTH - childName.length() ) ) );
+                }
+
+                long timestamp = 0;
+                try
+                {
+                    timestamp = entries[i].getLastModified();
+                }
+                catch ( IOException e )
+                {
+                    // ignore
+                }
+
+                w.write( " " );
+                w.write( format.format( timestamp != -1 ? new Date( timestamp ) : new Date() ) );
+                if ( directory )
+                {
+                    w.println( StringUtils.leftPad( "-", SIZE_COL_WIDTH ) );
+                }
+                else if ( entries[i] instanceof FileEntry)
+                {
+                    FileEntry fileEntry = (FileEntry) entries[i];
+                    try
+                    {
+                        long size = fileEntry.getSize();
+                        if ( size >= 0 )
+                        {
+                            w.println( StringUtils.leftPad( Long.toString( size ), SIZE_COL_WIDTH ) );
+                        }
+                        else
+                        {
+                            w.println( StringUtils.leftPad( "-", SIZE_COL_WIDTH ) );
+                        }
+                    }
+                    catch ( IOException e )
+                    {
+                        w.println( StringUtils.leftPad( "-", SIZE_COL_WIDTH ) );
+                    }
+                }
+                else
+                {
+                    w.println( StringUtils.leftPad( "-", SIZE_COL_WIDTH ) );
+                }
+            }
+        }
+        w.write( "</pre>" );
+        w.println( "  <hr/>" );
+        w.println( "</body>" );
+        w.println( "</html>" );
+        return;
+    }
+
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+
+        String httpMethodOverride = req.getHeader("X-HTTP-Method-Override");
+
+        if("PUT".equals(httpMethodOverride))
+            _doPut(req, resp);
+        else if("DELETE".equals(httpMethodOverride))
+            _doDelete(req,resp);
+        else
+            resp.sendError( HttpURLConnection.HTTP_BAD_METHOD );
+
+    }
+
     /**
      * {@inheritDoc}
      */
-    protected void doPut( HttpServletRequest req, HttpServletResponse resp )
-        throws ServletException, IOException
+    protected void _doPut( HttpServletRequest req, HttpServletResponse resp )
+            throws ServletException, IOException
     {
         String path = req.getPathInfo();
         String context;
@@ -294,8 +370,8 @@ public class FileSystemServlet
     /**
      * {@inheritDoc}
      */
-    protected void doDelete( HttpServletRequest req, HttpServletResponse resp )
-        throws ServletException, IOException
+    protected void _doDelete( HttpServletRequest req, HttpServletResponse resp )
+            throws ServletException, IOException
     {
         String path = req.getPathInfo();
         String context;
