@@ -314,57 +314,81 @@ public class FileSystemServlet
     {
 
         String path = req.getPathInfo();
-        String context;
-        if ( path == null )
+        boolean outcome = false;
+
+        if ( path.endsWith( "/" ) )
         {
-            path = req.getServletPath();
-            context = req.getContextPath();
+            outcome = createFile(req, resp, path, true);
         }
         else
         {
-            context = req.getContextPath() + req.getServletPath();
+            outcome = createFile(req, resp, path, false);
         }
-        if ( path.endsWith( "/" ) )
-        {
-            resp.sendError( HttpURLConnection.HTTP_BAD_METHOD );
-            return;
-        }
+
+        if(!outcome) resp.sendError( HttpURLConnection.HTTP_BAD_METHOD );
+    }
+
+    private boolean createFile(HttpServletRequest req, HttpServletResponse resp, String path, boolean isDirectory)
+            throws IOException {
         if ( path.startsWith( "/" ) )
         {
             path = path.substring( 1 );
         }
+
         String[] parts = path.split( "/" );
         if ( parts.length == 0 )
         {
             resp.sendError( HttpURLConnection.HTTP_BAD_METHOD );
-            return;
+            return true;
         }
+
         String name = parts[parts.length - 1];
-        if ( StringUtils.isEmpty( name ) )
+        if ( StringUtils.isEmpty(name) )
         {
             resp.sendError( HttpURLConnection.HTTP_BAD_METHOD );
-            return;
+            return true;
         }
+
+        // find parent
         DirectoryEntry parent = fileSystem.getRoot();
         for ( int i = 0; i < parts.length - 1; i++ )
         {
             parent = new DefaultDirectoryEntry( fileSystem, parent, parts[i] );
         }
+
+        // create file or directory
         ServletInputStream inputStream = null;
         try
         {
-            inputStream = req.getInputStream();
-            FileEntry put = fileSystem.put( parent, name, inputStream );
-            if ( put != null )
+            if(isDirectory)
             {
-                resp.setStatus( HttpURLConnection.HTTP_OK );
-                return;
+                DirectoryEntry dir = fileSystem.mkdir(parent, name);
+                if ( dir != null )
+                {
+                    resp.setStatus( HttpURLConnection.HTTP_OK );
+                    return true;
+                }
+            }
+            else
+            {
+                inputStream = req.getInputStream();
+                FileEntry put = fileSystem.put( parent, name, inputStream );
+                if ( put != null )
+                {
+                    resp.setStatus( HttpURLConnection.HTTP_OK );
+                    return true;
+                }
             }
         }
         finally
         {
-            IOUtils.closeQuietly( inputStream );
+            IOUtils.closeQuietly(inputStream);
         }
+        return false;
+    }
+
+    private void createDirectory(HttpServletResponse resp, String path) throws IOException {
+        String[] parts = path.split( "/" );
         resp.sendError( HttpURLConnection.HTTP_BAD_METHOD );
     }
 
