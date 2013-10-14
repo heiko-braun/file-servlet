@@ -98,7 +98,7 @@ public class FileSystemServlet
     protected void doGet( HttpServletRequest req, HttpServletResponse resp )
             throws ServletException, IOException
     {
-        boolean doesRequestJson = true ;//req.getHeader("Accept").contains("application/json");
+        boolean doesRequestJson = req.getHeader("Accept").contains("application/json");
 
         String path = req.getPathInfo();
         String context;
@@ -152,7 +152,7 @@ public class FileSystemServlet
             {
                 final String childName = entries[i].getName();
                 boolean directory = entries[i] instanceof DirectoryEntry;
-                String pathName = "http://"+ req.getHeader("host") + context + "/"+ Utils.urlEncodePathSegment(childName);
+                String pathName = "http://"+ req.getHeader("host") + context + "/"+ path + Utils.urlEncodePathSegment(childName);
 
                 if ( directory )
                 {
